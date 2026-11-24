@@ -246,6 +246,9 @@ type CompatDisposition = 'offer' | 'withhold'
  * until it is classified, so the offer never silently lags the upstream set.
  */
 const COMPLETIONS_COMPAT_GATE = {
+  requiresNonNullAssistantContent: 'withhold',
+  requiresToolsWithToolHistory: 'offer',
+  promptCacheKeyMode: 'withhold',
   supportsStore: 'offer',
   supportsDeveloperRole: 'offer',
   supportsReasoningEffort: 'offer',
@@ -277,6 +280,7 @@ const COMPLETIONS_COMPAT_GATE = {
 
 /** Disposition of every `OpenAIResponsesCompat` field; a drift gate like the one above. */
 const RESPONSES_COMPAT_GATE = {
+  promptCacheKeyMode: 'withhold',
   supportsDeveloperRole: 'offer',
   supportsMaxOutputTokens: 'offer',
   supportsStrictMode: 'offer',
@@ -292,6 +296,7 @@ const RESPONSES_COMPAT_GATE = {
 
 /** Disposition of every `AnthropicMessagesCompat` field; a drift gate like the one above. */
 const ANTHROPIC_COMPAT_GATE = {
+  supportsMessageThreads: 'withhold',
   supportsEagerToolInputStreaming: 'offer',
   supportsLongCacheRetention: 'offer',
   supportsCacheControlOnTools: 'offer',
@@ -314,6 +319,7 @@ const BEDROCK_COMPAT_GATE = {
 
 /** Disposition of every `MistralConversationsCompat` field. */
 const MISTRAL_COMPAT_GATE = {
+  supportsStrictMode: 'withhold',
   supportsMidConvoSystemMessages: 'withhold',
 } as const satisfies Record<keyof MistralConversationsCompat, CompatDisposition>
 
@@ -408,6 +414,8 @@ export interface PiAiCompatProfile {
   maxTokensField?: NonNullable<OpenAICompletionsCompat['maxTokensField']>
   /** Whether tool results must carry `name`; `openai-completions`. */
   requiresToolResultName?: boolean
+  /** Whether to send an empty tools array when history contains tool calls; `openai-completions`. */
+  requiresToolsWithToolHistory?: boolean
   /** Whether a user message after tool results needs an assistant message between; `openai-completions`. */
   requiresAssistantAfterToolResult?: boolean
   /** Whether thinking blocks must travel as text in `<thinking>` delimiters; `openai-completions`. */
@@ -432,7 +440,7 @@ export interface PiAiCompatProfile {
   thinkingTokenBudgetField?: PiAiThinkingTokenBudgetField
   /** vLLM scheduler `priority`; lower runs earlier, and the server must enable priority scheduling. Omitted unless configured. */
   vllmPriority?: number
-  /** Whether `openai-responses` accepts `max_output_tokens`; `false` omits it. Azure and Codex ignore this shared compat field. */
+  /** Whether Responses protocols accept `max_output_tokens`; `false` omits it where supported by the provider. */
   supportsMaxOutputTokens?: boolean
   /**
    * Whether the endpoint accepts `strict` in tool definitions;
@@ -493,7 +501,7 @@ type UpstreamCompat = OpenAICompletionsCompat & OpenAIResponsesCompat & Anthropi
  */
 export type EveryProfileFieldMatchesUpstream = AssertTrue<
   PiAiCompatProfile extends Partial<Pick<UpstreamCompat, OfferedCompatField>>
-    ? Partial<Pick<UpstreamCompat, OfferedCompatField>> extends PiAiCompatProfile ? true : false
+    ? { [K in OfferedCompatField]?: Exclude<UpstreamCompat[K], undefined> } extends PiAiCompatProfile ? true : false
     : false
 >
 

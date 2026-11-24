@@ -13,6 +13,9 @@ function resolved(compat: Record<string, unknown>, api = 'openai-completions') {
 }
 
 describe('pi-ai gateway compatibility declarations', () => {
+  it.each([true, false])('preserves the tool-history empty-array override %s', (value) => {
+    expect(resolved({ requiresToolsWithToolHistory: value })).toMatchObject({ requiresToolsWithToolHistory: value })
+  })
   it.each(THINKING_TOKEN_BUDGET_FIELDS)('preserves reasoning-budget field %s', (field) => {
     expect(resolved({ thinkingTokenBudgetField: field })).toMatchObject({ thinkingTokenBudgetField: field })
   })
@@ -36,6 +39,7 @@ describe('pi-ai gateway compatibility declarations', () => {
     { vllmPriority: 'high' },
     { vllmPriority: 0.5 },
     { supportsMaxOutputTokens: 'false' },
+    { requiresToolsWithToolHistory: 'true' },
     { chatTemplateKwargs: { budget: { $var: 'thinking.unknown' } } },
     { chatTemplateArgs: { budget: { $var: 'thinking.unknown' } } },
   ])('rejects invalid schema values: %j', (compat) => {
@@ -46,13 +50,14 @@ describe('pi-ai gateway compatibility declarations', () => {
     { thinkingTokenBudgetField: 'thinking_budget' },
     { vllmPriority: 0 },
     { supportsMaxOutputTokens: false },
+    { requiresToolsWithToolHistory: true },
   ])('rejects fields on a protocol that cannot consume them: %j', (compat) => {
     expect(() => resolved(compat, 'anthropic-messages')).toThrow(/compat/)
   })
 
   it.each([
     'supportsMidConvoEffort', 'allowedFallbackModels', 'supportsMidConvoSystemMessages',
-    'supportsMidConvoToolAdditions', 'supportsMidConvoToolChanges', 'sessionAffinityFormat',
+    'supportsMidConvoToolAdditions', 'supportsMidConvoToolChanges', 'sessionAffinityFormat', 'supportsMessageThreads',
   ])('withholds catalog-owned %s', (field) => {
     expect(() => resolved({ [field]: true }, 'anthropic-messages'))
       .toThrow(/which is not configurable here/)

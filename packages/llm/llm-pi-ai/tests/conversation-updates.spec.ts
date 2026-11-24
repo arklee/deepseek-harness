@@ -250,23 +250,24 @@ describe('historical tool availability on the wire', () => {
     })
   })
 
-  it('loads Codex tool additions through tool-search output', async () => {
+  it('loads Codex tool additions through additional-tools history', async () => {
     // Codex extracts an account id from the token before contacting the mock server.
     const payload = Buffer.from(JSON.stringify({ 'https://api.openai.com/auth': { chatgpt_account_id: 'fixture-account' } })).toString('base64url')
     const token = `e30.${payload}.fixture`
     const update = addition()
-    const { requests } = await send('openai-codex', 'gpt-5.5', {
+    const { requests } = await send('openai-codex', 'gpt-5.6-sol', {
       messages: [user('first'), update], tools: [baseline, added],
       toolHistory: { tools: [baseline], updates: [{ messageId: update.id, additions: [added] }] },
     }, token)
     expect(requests).toHaveLength(1)
+    const updateNotice: unknown = expect.stringContaining('incremental tools update')
     expect(requests[0]).toMatchObject({
-      tools: [{ type: 'function', name: 'read' }],
       input: [
+        { type: 'additional_tools', role: 'developer', tools: [{ type: 'function', name: 'read' }] },
         { role: 'user', content: [{ type: 'input_text', text: 'first' }] },
-        { type: 'tool_search_call', execution: 'client', arguments: { query: 'search', limit: 1 } },
-        { type: 'tool_search_output', execution: 'client', tools: [
-          { type: 'function', name: 'search', description: added.description, parameters: added.parameters, defer_loading: true },
+        { role: 'developer', content: updateNotice },
+        { type: 'additional_tools', role: 'developer', tools: [
+          { type: 'function', name: 'search', description: added.description, parameters: added.parameters },
         ] },
         { role: 'developer', content: 'Instruction one.\n\nInstruction two.' },
       ],
@@ -290,7 +291,7 @@ describe('historical tool availability on the wire', () => {
     ] })
   })
 
-  it('rebuilds the Responses baseline after its immediate tool is removed', async () => {
+  it('uses current declarations for a Responses model without historical tool support', async () => {
     const update = addition()
     const remove = createDeveloperMessage({ source: { kind: 'tool-registry' }, content: [{ type: 'tool-removal', toolName: 'read' }] })
     const { requests } = await send('openai', 'gpt-5.4', {
@@ -303,7 +304,6 @@ describe('historical tool availability on the wire', () => {
     expect(requests[0]).toHaveProperty('tools', [expect.objectContaining({ name: 'search' })])
     expect(requests[0]).toHaveProperty('input', [
       { role: 'user', content: [{ type: 'input_text', text: 'first' }] },
-      { role: 'developer', content: 'Instruction one.\n\nInstruction two.' },
     ])
     expect(JSON.stringify(requests[0])).not.toContain('tool_removal')
     expect(JSON.stringify(requests[0])).not.toContain('Read a file')

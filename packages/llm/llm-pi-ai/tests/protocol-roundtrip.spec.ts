@@ -117,6 +117,27 @@ const pairs: { a: Api; b: Api | 'deepseek-messages' }[] = [
 ]
 
 describe('protocol history round trips', () => {
+  it.each([undefined, true, false])('sends an empty tools array only when requested by the gateway: %s', async (requiresToolsWithToolHistory) => {
+    vi.stubEnv('PROTOCOL_ROUNDTRIP_KEY', 'test-key')
+    const server = await mockServer([{ events: frames('openai-completions', true) }, { events: frames('openai-completions') }])
+    const ctx = new Context()
+    contexts.push(ctx)
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmPiAi, { providers: {
+      route: {
+        api: 'openai-completions', baseURL: server.url, apiKeyEnv: 'PROTOCOL_ROUNDTRIP_KEY', models: [{ id: 'model' }],
+        ...requiresToolsWithToolHistory === undefined ? {} : { compat: { requiresToolsWithToolHistory } },
+      },
+    } })
+    const first = await assemble(ctx, { provider: 'route', model: 'model', messages: [], tools: [tool] })
+    const messages = [first.message, ...first.message.content.filter(block => block.type === 'tool-call').map(call =>
+      createToolResultMessage({ callId: call.id, content: [{ type: 'text', text: 'result' }], isError: false }))]
+    const second = await assemble(ctx, { provider: 'route', model: 'model', messages, tools: [] })
+    expect(second.finish).toEqual({ kind: 'stop' })
+    if (requiresToolsWithToolHistory === true) expect(server.requests[1]).toHaveProperty('tools', [])
+    else expect(server.requests[1]).not.toHaveProperty('tools')
+  })
+
   it.each(pairs)('$a → $b → $a preserves saved content and restores native replay', async ({ a, b }) => {
     vi.stubEnv('PROTOCOL_ROUNDTRIP_KEY', 'test-key')
     const source = await mockServer([{ events: frames(a, true) }, { events: frames(a) }, { events: frames(a) }])

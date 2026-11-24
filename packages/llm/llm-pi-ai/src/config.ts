@@ -286,7 +286,7 @@ const chatTemplateKwarg: z<ChatTemplateKwargValue> = z.union([
   z.const(null),
   z.object({
     $var: z.union(CHAT_TEMPLATE_VARS).required(),
-    omitWhenOff: z.boolean(),
+    omitWhenOff: z.union([z.boolean(), z.const(undefined)]),
   }),
 ])
 
@@ -298,6 +298,7 @@ const compatProfile: z<PiAiCompatProfile> = z.object({
   supportsFinishReason: z.boolean(),
   maxTokensField: z.union(MAX_TOKENS_FIELDS),
   requiresToolResultName: z.boolean(),
+  requiresToolsWithToolHistory: z.boolean(),
   requiresAssistantAfterToolResult: z.boolean(),
   requiresThinkingAsText: z.boolean(),
   requiresReasoningContentOnAssistantMessages: z.boolean(),
