@@ -1,0 +1,2 @@
+# Preserve format-patch context markers on empty lines.
+*.patch whitespace=-blank-at-eol
