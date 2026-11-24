@@ -31,6 +31,7 @@ afterEach(async () => {
   while (cleanups.length > 0) await cleanups.pop()!()
   await closeMockServers()
   vi.unstubAllEnvs()
+  vi.unstubAllGlobals()
 })
 
 async function home(): Promise<string> {
@@ -77,6 +78,45 @@ describe('login flows in a real composition', () => {
 })
 
 describe('request-level dynamic profiles', () => {
+  it('serves OpenAI Responses with the signed-in credential unless the route names a key', async () => {
+    const received: { url: string; authorization: string | null; temperature?: number }[] = []
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init: RequestInit) => {
+      const request = new Request(input, init)
+      const body = await request.json() as { temperature?: number }
+      received.push({ url: request.url, authorization: request.headers.get('authorization'),
+        ...body.temperature === undefined ? {} : { temperature: body.temperature } })
+      const item = { type: 'message', id: 'msg_ok', role: 'assistant', content: [{ type: 'output_text', text: 'OK', annotations: [] }] }
+      const events = [
+        { type: 'response.output_item.added', output_index: 0, item },
+        { type: 'response.output_item.done', output_index: 0, item },
+        { type: 'response.completed', response: { id: 'resp_ok', status: 'completed', output: [item],
+          usage: { input_tokens: 3, output_tokens: 1, total_tokens: 4 } } },
+      ]
+      return new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(''), {
+        headers: { 'Content-Type': 'text/event-stream' },
+      })
+    })
+    const ctx = await boot(await home(), { providers: { openai: {} } })
+    const key = recordKeyFor('openai')
+    const request = { provider: 'openai', model: 'gpt-4.1', messages: [], temperature: 0.3 }
+    await ctx.credentials.modifyRecord(key, () => Promise.resolve({ kind: 'grant', payload: {
+      type: 'oauth', access: 'test-access', refresh: 'test-refresh', expires: Date.now() + 3_600_000,
+    } }))
+    expect((await assemble(ctx, request)).finish).toEqual({ kind: 'stop' })
+    await ctx.credentials.set(credentialRef('PI_OVERRIDE_KEY'), 'sk-override')
+    await configurations.get(ctx)!.update({ providers: { openai: { apiKeyEnv: 'PI_OVERRIDE_KEY' } } })
+    expect((await assemble(ctx, request)).finish).toEqual({ kind: 'stop' })
+    await configurations.get(ctx)!.replace(initialConfigs.get(ctx)!)
+    await ctx.credentials.modifyRecord(key, () => Promise.resolve({ kind: 'api-key', key: 'sk-signed-in' }))
+    expect((await assemble(ctx, request)).finish).toEqual({ kind: 'stop' })
+    const url = 'https://api.openai.com/v1/responses'
+    expect(received).toEqual([
+      { url, authorization: 'Bearer test-access' },
+      { url, authorization: 'Bearer sk-override', temperature: 0.3 },
+      { url, authorization: 'Bearer sk-signed-in', temperature: 0.3 },
+    ])
+  })
+
   it('keeps stored catalog failures editable while isolating requests and validating changed providers', async () => {
     vi.stubEnv('PI_DYNAMIC_KEY', '')
     const dir = await home()

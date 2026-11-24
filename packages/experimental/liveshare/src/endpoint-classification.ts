@@ -126,6 +126,8 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'session/workspacePathApplications': 'owner-only', // owner applies a Workspace path
   'sessionStatus/follow': 'owner-only', // owner reading reminders
   'sessionStatus/mark': 'owner-only', // owner reading reminders
+  'authorization/begin': 'owner-only',
+  'authorization/list': 'owner-only',
   'credentials/describe': 'owner-only', // owner credentials; secrets never reach a reader
   'credentials/set': 'owner-only', // owner credentials; secrets never reach a reader
   'credentials/unset': 'owner-only', // owner credentials; secrets never reach a reader

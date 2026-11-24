@@ -5,18 +5,10 @@
  * and expose only confirmed API-key state through accessible
  * solid configured or missing dots. A whole-section provider without a
  * configured key renders as its open setup card instead of a row, but only in
- * the first-run posture — no provider on the page can serve requests yet — and
- * only until the user closes that card. The add flow is one card behind one
- * button: a mode switch chooses between adopting a dormant directory provider
- * (the catalog select over the provider editor) and declaring a custom model
- * API (the create form). A panel mounts the first time its mode is shown and
- * stays mounted, hidden, while the card is open and its mode stays offered,
- * so switching modes discards neither draft and an unvisited mode costs
- * nothing; the switch holds still while either panel has a write or an
- * endpoint interrogation in flight, since a switch underneath one would
- * orphan the answer. Each card kind owns its own open state, so closing one
- * never discards a draft in another. Every
- * mutation writes through the wire, while a provider removal first requires
+ * the first-run posture and until the user closes it. The add card offers
+ * catalog, custom API, and OAuth setup. Catalog and custom panels retain
+ * drafts across tab changes; a running OAuth attempt belongs to its panel.
+ * Every mutation writes through the wire, while a provider removal first requires
  * confirmation; the page re-renders from pushed invalidations or the
  * post-apply reload.
  */
@@ -28,6 +20,7 @@ import type { InjectFace, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-sl
 import type { LlmNativeAuth, SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
 // Type-only: pulls this package's SlotMap merge (the two Models child slots).
 import type {} from './slot-contract.ts'
+import { OAuthProviderCard, oauthEligible } from './OAuthProviderCard.tsx'
 import { CustomProviderCard } from './CustomProviderCard.tsx'
 import { deriveKeyRef, protocolChoices, providerUsable, reasoningLevelChoices } from './store.ts'
 import type { ModelsSettingsStore, ProviderRow } from './store.ts'
@@ -53,11 +46,8 @@ export interface ModelsSectionInjected {
   t: (key: keyof typeof en) => string
 }
 
-/**
- * The two ways the add card gains a provider: adopt a directory row the
- * adapter already knows, or declare a route it does not.
- */
-type AddMode = 'catalog' | 'custom'
+/** Add a catalog route, declare an endpoint, or sign in through a native provider. */
+type AddMode = 'catalog' | 'custom' | 'oauth'
 
 /** The child slots this section declares and dispatches (see ./slot-contract.ts). */
 type ModelsChildSlots = 'settings.models.provider-card' | 'settings.models.footer'
@@ -256,11 +246,12 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
   const [editing, setEditing] = useState<EditorTarget | undefined>(undefined)
   const [addOpen, setAddOpen] = useState(false)
   const [addMode, setAddMode] = useState<AddMode>('catalog')
-  /** The modes shown since the add card opened; each keeps its panel mounted. */
+  /** Visited draft panels stay mounted until the add card closes. */
   const [visited, setVisited] = useState<ReadonlySet<AddMode>>(() => new Set())
   /** Whether each add panel has a write or an interrogation in flight. */
   const [catalogBusy, setCatalogBusy] = useState(false)
   const [customBusy, setCustomBusy] = useState(false)
+  const [oauthBusy, setOAuthBusy] = useState(false)
   /** Base of the add card's tab and panel ids. */
   const addId = useId()
   const [deleteTarget, setDeleteTarget] = useState<EditorTarget | undefined>(undefined)
@@ -288,6 +279,7 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
     setAddOpen(false)
     setCatalogBusy(false)
     setCustomBusy(false)
+    setOAuthBusy(false)
   }
 
   const closeEditor = (changed: boolean, target: ProviderIdentity): void => {
@@ -388,9 +380,15 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
   const customOffered = piAi !== undefined
   const customEnabled = protocols.length > 0
   const bothOffered = catalogOffered && customOffered
-  const mode: AddMode = bothOffered ? addMode : customOffered ? 'custom' : 'catalog'
+  const oauthRows = piAi === undefined ? [] : configurable.filter(row =>
+    oauthEligible(row, schema.getPath(piAi.value, row.entry.settingsPath)))
+  const oauthExcluded = configurable.filter(row => row.entry.settingsNs === 'llm-pi-ai' && row.configured
+    && row.entry.declared !== true && !oauthRows.includes(row)).map(row => row.entry.provider)
+  const oauthOffered = bothOffered && configurable.some(row => row.entry.settingsNs === 'llm-pi-ai')
+  const oauthEnabled = oauthOffered && oauthRows.some(row => row.entry.nativeAuth?.oauth === true)
+  const mode: AddMode = bothOffered ? addMode === 'oauth' && !oauthOffered ? 'custom' : addMode : customOffered ? 'custom' : 'catalog'
   const mounted = (candidate: AddMode): boolean => mode === candidate || visited.has(candidate)
-  const switchLocked = catalogBusy || customBusy
+  const switchLocked = catalogBusy || customBusy || oauthBusy
   // The catalog draft: the row the user chose, kept through a refresh that
   // adopts or withdraws it elsewhere so a typed key is never discarded, for as
   // long as its namespace can still take the write; else the first row still
@@ -511,7 +509,7 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                         type="button"
                         className={styles['secondaryButton']}
                         aria-label={providerCopy(t('editProvider'), target)}
-                        disabled={!open && state.status !== 'ready'}
+                        disabled={oauthBusy || !open && state.status !== 'ready'}
                         onClick={() => {
                           if (!open && controller.store.getSnapshot().status !== 'ready') return
                           setSavedTarget(undefined)
@@ -531,7 +529,7 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                         type="button"
                         className={styles['dangerButton']}
                         aria-label={providerCopy(t('removeProvider'), target)}
-                        disabled={!state.writable || state.status !== 'ready'}
+                        disabled={oauthBusy || !state.writable || state.status !== 'ready'}
                         onClick={() => {
                           if (controller.store.getSnapshot().status !== 'ready') return
                           setSavedTarget(undefined)
@@ -575,6 +573,7 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                 {bothOffered
                   ? (
                     <SegmentedControl
+                      className={styles['modeSwitch']}
                       id={addId}
                       label={t('addMode')}
                       value={mode}
@@ -592,6 +591,7 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                           disabled: !customEnabled,
                           ...customEnabled ? {} : { title: t('addCustomUnavailable') },
                         },
+                        ...oauthOffered ? [{ value: 'oauth' as const, label: t('addOAuth') }] : [],
                       ]}
                       onChange={(next) => {
                         setAddMode(next)
@@ -607,7 +607,7 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                     </div>
                   )}
                 <p className={styles['advancedHint']}>
-                  {t(mode === 'catalog' ? 'addCatalogHint' : 'addCustomHint')}
+                  {t(mode === 'catalog' ? 'addCatalogHint' : mode === 'custom' ? 'addCustomHint' : 'oauthHint')}
                 </p>
               </div>
               {mounted('catalog') && draft !== undefined
@@ -690,6 +690,14 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                   </div>
                 )
                 : null}
+              {mode === 'oauth' && oauthOffered ? (
+                <div id={`${addId}-oauth-panel`} role="tabpanel" aria-labelledby={`${addId}-oauth`} className={styles['addPanel']}>
+                  <OAuthProviderCard rows={oauthRows} excluded={oauthExcluded} controller={controller}
+                    operations={operations} schema={schema} t={t}
+                    readOnly={!state.writable} onBusy={setOAuthBusy} onClose={closeAdd}
+                    onSaved={(row) => { closeEditor(true, row.entry) }} />
+                </div>
+              ) : null}
             </div>
           )
           : catalogOffered || customOffered
@@ -700,11 +708,11 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                 <button
                   type="button"
                   className={styles['addButton']}
-                  disabled={!state.writable || state.status !== 'ready' || (!catalogEnabled && !customEnabled)}
+                  disabled={oauthBusy || !state.writable || state.status !== 'ready' || (!catalogEnabled && !customEnabled && !oauthEnabled)}
                   onClick={() => {
                     if (controller.store.getSnapshot().status !== 'ready') return
                     const first = addable[0]
-                    const initial: AddMode = catalogEnabled ? 'catalog' : 'custom'
+                    const initial: AddMode = catalogEnabled ? 'catalog' : customEnabled ? 'custom' : 'oauth'
                     setSavedTarget(undefined)
                     setEditing(first === undefined ? undefined : targetOf(first.row))
                     setAddMode(initial)

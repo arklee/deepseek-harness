@@ -106,7 +106,7 @@ describe('web e2e: Models settings page configures a dormant provider', () => {
     const dialog = page.getByRole('dialog', { name: '设置' })
     await dialog.waitFor({ timeout: 10_000 })
     await dialog.getByRole('button', { name: '模型', exact: true }).click()
-    await dialog.getByText('填入各提供商的 API 密钥即可使用其模型。').waitFor({ timeout: 10_000 })
+    await dialog.getByText('填写 API 密钥，或使用支持的提供商账号登录。').waitFor({ timeout: 10_000 })
     // The dormant pi-ai adapter contributes its whole installed catalog; no
     // provider is configured yet, so the page is one add button.
     const add = dialog.getByRole('button', { name: '添加模型提供商' })
@@ -127,9 +127,31 @@ describe('web e2e: Models settings page configures a dormant provider', () => {
     await pick.selectOption('openai-codex')
     await expect.poll(async () => dialog.getByRole('textbox', { name: 'API 密钥', exact: true }).count(), { timeout: 10_000 }).toBe(0)
     expect(await dialog.getByRole('button', { name: '认证说明', exact: true }).count()).toBe(0)
-    expect(await dialog.textContent()).not.toMatch(/oauth/i)
+    expect(await dialog.getByRole('tabpanel', { name: '第三方模型提供商' }).textContent()).not.toMatch(/oauth/i)
     const nativeSnapshot = await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(NATIVE_KEYLESS_EXPECTED, nativeSnapshot, MODE)
+    const oauth = modes.getByRole('tab', { name: /OAuth/i })
+    await oauth.click()
+    const oauthPanel = dialog.getByRole('tabpanel', { name: /OAuth/i })
+    const providers = oauthPanel.getByRole('combobox')
+    await providers.selectOption('openai-codex')
+    expect(await providers.locator('option').evaluateAll(options => options.map(option => option.getAttribute('value'))))
+      .not.toContain('amazon-bedrock')
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'oauth.expected.md'),
+      await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd), MODE)
+    const viewport = page.viewportSize()!
+    try {
+      await page.setViewportSize({ width: 390, height: 844 })
+      const tabs = await modes.getByRole('tab').evaluateAll(nodes => nodes.map((node) => {
+        const { left, right } = node.getBoundingClientRect()
+        return { left, right }
+      }))
+      expect(tabs).toHaveLength(3)
+      expect(tabs.every(({ left, right }) => left >= 0 && right <= 390 && right > left)).toBe(true)
+    } finally {
+      await page.setViewportSize(viewport)
+    }
+    await modes.getByRole('tab', { name: '第三方模型提供商' }).click()
     await pick.selectOption('minimax-cn')
     await dialog.getByRole('textbox', { name: 'API 密钥', exact: true }).waitFor({ timeout: 10_000 })
     const snapshot = await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd)
@@ -893,13 +915,51 @@ describe('web e2e: Models settings page configures a dormant provider', () => {
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)
 
+  it('authorizes a catalog provider through the browser without writing tokens to its profile', async () => {
+    await page.goto(scaffold.authenticatedUrl)
+    await openSettings(page, 'zh')
+    const dialog = page.getByRole('dialog', { name: '设置' })
+    await dialog.getByRole('button', { name: '模型', exact: true }).click()
+    await dialog.getByRole('button', { name: '添加模型提供商' }).click()
+    await dialog.getByRole('tab', { name: 'OAuth' }).click()
+    const panel = dialog.getByRole('tabpanel', { name: 'OAuth' })
+    await panel.getByRole('combobox').selectOption('anthropic')
+
+    // Only the issuer's token exchange is simulated; pi-ai owns PKCE and DSH owns the stream and credential write.
+    const hostFetch = globalThis.fetch
+    const exchange = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      if (url !== 'https://platform.claude.com/v1/oauth/token') return hostFetch(url, init)
+      if (typeof init?.body !== 'string' || !init.body.includes('"code":"browser-test-code"')) return new Response(null, { status: 400 })
+      return Response.json({ access_token: 'test-browser-access', refresh_token: 'test-browser-refresh', expires_in: 3600 })
+    })
+    try {
+      await panel.getByRole('button', { name: '登录', exact: true }).click()
+      await panel.getByRole('combobox', { name: /Select Anthropic login method/ }).selectOption('copy_code')
+      await panel.getByRole('button', { name: '继续' }).click()
+      const link = panel.getByRole('link', { name: '打开登录页面' })
+      const href = await link.getAttribute('href')
+      const authorization = new URL(href!)
+      expect(authorization.origin).toBe('https://claude.ai')
+      await panel.getByPlaceholder('code#state').fill(`browser-test-code#${authorization.searchParams.get('state')}`)
+      await panel.getByRole('button', { name: '继续' }).click()
+      await dialog.getByText('已保存 anthropic。', { exact: true }).waitFor()
+      const profile = await readFile(join(scaffold.harnessHome, 'profiles', 'scaffold', 'cordis.patch.yml'), 'utf8')
+      expect(profile).toContain('anthropic: {}')
+      expect(profile).not.toContain('test-browser-')
+      expect(await readFile(join(scaffold.harnessHome, '.credentials.yaml'), 'utf8')).toContain('test-browser-refresh')
+      expect(await dialog.textContent()).not.toContain('test-browser-')
+    } finally {
+      exchange.mockRestore()
+    }
+  }, 60_000)
+
   it.skipIf(MODE === 'record')('keeps the fixture inventory closed', async () => {
     await assertFixtureInventory(SNAPSHOT_DIR, [
       'configured.expected.md', 'declared-edit.expected.md', 'declared.expected.md',
       'delete.expected.md', 'empty.expected.md', 'model-picker.expected.md',
       'native-delete.expected.md', 'native-keyless.expected.md', 'catalog-inputs.expected.md',
       'mobile-collapsed.expected.md', 'mobile-expanded.expected.md',
-      'refreshing.expected.md', 'image-only.expected.md',
+      'refreshing.expected.md', 'image-only.expected.md', 'oauth.expected.md',
     ])
   })
 })

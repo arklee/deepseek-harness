@@ -560,6 +560,25 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'authorizationController',
+    summary: 'Lists redacted flow metadata and binds one attempt to one bidirectional stream.',
+    description: 'Lists redacted flow metadata and binds one attempt to one bidirectional stream.',
+    methods: [
+      {
+        signature: '@Remote async list(): Promise<AuthorizationFlowView[]>',
+        description: 'List model sign-in methods available to an owner.',
+        parameters: [],
+        returns: 'registered OAuth flows and their redacted record status; empty when none is registered.',
+      },
+      {
+        signature: '@Remote({ mode: \'stream\' }) begin(key: string, method: string, signal: AbortSignal): RemoteStream<AuthorizationFrame, AuthorizationAnswer>',
+        description: 'Run one model sign-in method for the initiating owner browser.',
+        parameters: [{ name: 'key', description: 'model credential key returned by `list()`.' }, { name: 'method', description: 'OAuth method id offered for that key.' }, { name: 'signal', description: 'stream lifetime; closing the stream withdraws the attempt and pending questions.' }],
+        returns: 'notices, questions, withdrawals, and the final outcome; answers travel on the same stream.',
+      },
+    ],
+  },
+  {
     key: 'browserUse',
     summary: 'Owns one optional provider registration in the shared browser-use service.',
     description: 'Owns one optional provider registration in the shared browser-use service.',
@@ -6651,12 +6670,24 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface AuthenticationProvider {\n    authenticate(request: ConnectionTrustRequest): PeerScope | undefined;\n}',
   },
   {
+    name: 'AuthorizationAnswer',
+    declaration: 'export interface AuthorizationAnswer {\n    id: number;\n    value: string;\n}',
+  },
+  {
     name: 'AuthorizationEntry',
     declaration: 'export interface AuthorizationEntry {\n    key: CredentialKey;\n    label: string;\n    methods: readonly AuthorizationMethod[];\n    inFlight: boolean;\n}',
   },
   {
     name: 'AuthorizationFlow',
     declaration: 'export interface AuthorizationFlow {\n    readonly key: CredentialKey;\n    readonly label: string;\n    readonly methods: readonly [\n        AuthorizationMethod,\n        ...AuthorizationMethod[]\n    ];\n    run(session: AuthorizationSession): Promise<void>;\n}',
+  },
+  {
+    name: 'AuthorizationFlowView',
+    declaration: 'export interface AuthorizationFlowView {\n    key: string;\n    label: string;\n    methods: readonly {\n        id: string;\n        label: string;\n    }[];\n    inFlight: boolean;\n    configured: boolean;\n    recordKind?: \'grant\' | \'api-key\';\n}',
+  },
+  {
+    name: 'AuthorizationFrame',
+    declaration: 'export type AuthorizationFrame = {\n    kind: \'notice\';\n    notice: {\n        message: string;\n        url?: string;\n        code?: string;\n    };\n} | {\n    kind: \'prompt\';\n    id: number;\n    prompt: AuthorizationPromptView;\n} | {\n    kind: \'withdraw\';\n    id: number;\n} | {\n    kind: \'done\';\n    status: \'authorized\' | \'cancelled\';\n};',
   },
   {
     name: 'AuthorizationInteraction',
@@ -6681,6 +6712,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'AuthorizationPromptOption',
     declaration: 'export interface AuthorizationPromptOption {\n    id: string;\n    label: string;\n    description?: string;\n}',
+  },
+  {
+    name: 'AuthorizationPromptView',
+    declaration: 'export type AuthorizationPromptView = {\n    kind: \'text\' | \'secret\';\n    message: string;\n    placeholder?: string;\n} | {\n    kind: \'select\';\n    message: string;\n    options: readonly {\n        id: string;\n        label: string;\n        description?: string;\n    }[];\n};',
   },
   {
     name: 'AuthorizationRequest',

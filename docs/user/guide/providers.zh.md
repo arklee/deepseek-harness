@@ -24,6 +24,12 @@
 
 可编辑的密钥草稿非空时，输入框内显示眼睛按钮。选择**显示密钥**检查当前输入，选择**隐藏密钥**重新遮住输入。修改输入后会重新遮住密钥。原生密码框不提供剪切；可选中草稿后按 Backspace 清空，或显示明文后再剪切。已保存凭据仍保持只写。
 
+## 通过 OAuth 登录
+
+打开**设置 → 模型 → 添加模型提供商**，选择 **OAuth**。选好提供商后开始登录，按提示操作：有的提供商需要你打开验证页面并输入设备码，有的则需要把授权码粘贴回 dsh。此方式无需 API 密钥。授权完成后，在模型选择器中选择该提供商的模型。
+
+如果提供商已配置 API 密钥引用、自定义端点、协议或请求头，请先移除这些覆盖项，再为该路由使用 OAuth。如果需要保留中转站配置，可以改用单独的目录路由，例如用 `openai-codex` 登录 ChatGPT。从模型列表删除提供商不会撤销在提供商处授予的权限。
+
 ## 添加自定义模型 API
 
 对于中转站、公司网关、自建服务器或已安装目录中不存在的提供商，把卡片切换到**自定义模型 API**。提供小写 Provider ID、基础 URL、API 协议、凭据和至少一个模型。**API 协议**必须选网关实际使用的那一种，选择框提供四种：OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 和 Gemini API，在当前 profile 的 `cordis.patch.yml` 中分别存为 `openai-completions`、`openai-responses`、`anthropic-messages` 和 `google-generative-ai`。Gemini API 的基础 URL 包含 API 版本，例如 `https://gateway.example/v1beta`。一个提供商只使用一种协议，网关同时提供两种时需要建两个提供商。

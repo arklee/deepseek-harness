@@ -381,7 +381,21 @@
   gap: 8px;
 }
 
-/* One panel per mode. Both stay mounted while the card is open; the hidden
+.modeSwitch {
+  box-sizing: border-box;
+  max-width: 100%;
+  grid-auto-columns: minmax(0, 1fr);
+}
+
+.modeSwitch [role='tab'] {
+  height: auto;
+  min-height: 28px;
+  padding: 4px 8px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Draft panels stay mounted while the card is open; the hidden
    attribute must win over the panel's own display, or the inactive draft
    would show beneath the active one. */
 .addPanel {

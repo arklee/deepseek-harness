@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -7,7 +7,8 @@ import AuthorizationService from '@deepseek-ai/dsh-authorization'
 import type { AuthorizationInteraction, AuthorizationNotice, AuthorizationPrompt } from '@deepseek-ai/dsh-authorization'
 import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
 import type { CredentialKey } from '@deepseek-ai/dsh-credentials'
-import type { AuthEvent, AuthInteraction, AuthPrompt, AuthType, Credential } from '@earendil-works/pi-ai'
+import type { AuthEvent, AuthInteraction, AuthPrompt, AuthType, Credential, LoginOptions } from '@earendil-works/pi-ai'
+import { openaiDeviceId } from '../src/openai-device-id.ts'
 
 const login = vi.hoisted(() => vi.fn())
 
@@ -25,12 +26,14 @@ const { registerPiAiFlows } = await import('../src/login.ts')
 
 const CODEX = recordKeyFor('openai-codex')
 const dirs: string[] = []
+const contexts: Context[] = []
 
 /** A context with the record store, the seam, and every pi-ai login flow. */
 async function harness(): Promise<Context> {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-pi-login-'))
   dirs.push(dir)
   const ctx = new Context()
+  contexts.push(ctx)
   await ctx.plugin(LocalCredentialProvider, { path: join(dir, '.credentials.yaml'), watch: false })
   await ctx.plugin(AuthorizationService)
   registerPiAiFlows(ctx, { credentials: credentialStoreFrom(ctx), authContext: authContextFrom(ctx) })
@@ -78,6 +81,8 @@ async function attempt(
 
 afterEach(async () => {
   login.mockReset()
+  vi.unstubAllEnvs()
+  await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose()))
   await Promise.all(dirs.splice(0).map(dir => rm(dir, { recursive: true, force: true })))
 })
 
@@ -97,21 +102,58 @@ describe('pi-ai login flows', () => {
     // through its own prompt rather than leaving it to the settings form.
     expect(offered.find(entry => entry.key === recordKeyFor('deepseek'))?.methods.map(one => one.id))
       .toEqual(['api-key'])
-    // pi-ai ships Sign in with ChatGPT for `openai`, which needs an
-    // installation ID the harness does not supply; only the key login is offered.
     expect(catalogProvider('openai')?.auth.oauth?.loginLabel).toBe('Sign in with ChatGPT')
     expect(offered.find(entry => entry.key === recordKeyFor('openai'))?.methods.map(one => one.id))
-      .toEqual(['api-key'])
+      .toEqual(['oauth', 'api-key'])
   })
 
   it('runs the pi-ai auth type the chosen method names', async () => {
     const ctx = await harness()
 
     await attempt(ctx, () => Promise.resolve())
-    expect(login).toHaveBeenLastCalledWith('openai-codex', 'oauth', expect.anything())
+    expect(login).toHaveBeenLastCalledWith('openai-codex', 'oauth', expect.anything(), undefined)
 
     await attempt(ctx, () => Promise.resolve(), { key: recordKeyFor('anthropic'), method: 'api-key' })
-    expect(login).toHaveBeenLastCalledWith('anthropic', 'api_key', expect.anything())
+    expect(login).toHaveBeenLastCalledWith('anthropic', 'api_key', expect.anything(), undefined)
+  })
+
+  it('supplies a persistent, home-scoped UUID to ChatGPT sign-in only', async () => {
+    const ctx = await harness()
+    const dir = dirs[0]!
+    vi.stubEnv('DSH_HOME', dir)
+    const path = join(dir, 'state/llm-pi-ai/openai-device-id')
+    const key = recordKeyFor('openai')
+    await attempt(ctx, async () => {}, { key, method: 'api-key' })
+    expect(login).toHaveBeenLastCalledWith('openai', 'api_key', expect.anything(), undefined)
+    await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' })
+
+    const signal = new AbortController().signal
+    const [id, concurrent] = await Promise.all([openaiDeviceId(signal), openaiDeviceId(signal)])
+    expect(concurrent).toBe(id)
+    expect(id).toMatch(/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/)
+    await attempt(ctx, async () => {}, { key, method: 'oauth' })
+    const options = login.mock.lastCall?.[3] as LoginOptions
+    expect(options.agentName).toBe('DeepSeek Harness')
+    expect(options.getDeviceId?.()).toBe(id)
+    expect((await readFile(path, 'utf8')).trim()).toBe(id)
+    vi.stubEnv('DSH_HOME', join(dir, 'other'))
+    expect(await openaiDeviceId(signal)).not.toBe(id)
+  })
+
+  it('does not replace or disclose an unreadable or malformed registration ID', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-openai-device-'))
+    dirs.push(dir)
+    vi.stubEnv('DSH_HOME', dir)
+    const path = join(dir, 'state/llm-pi-ai/openai-device-id')
+    await mkdir(path, { recursive: true })
+    const signal = new AbortController().signal
+    await expect(openaiDeviceId(signal)).rejects.toThrow()
+    await rm(path, { recursive: true })
+    await writeFile(path, 'not-an-id')
+    await expect(openaiDeviceId(signal)).rejects.toMatchObject({
+      code: 'INVALID_OPENAI_DEVICE_ID', message: expect.not.stringContaining('not-an-id') as string,
+    })
+    expect(await readFile(path, 'utf8')).toBe('not-an-id')
   })
 
   it('commits what the login produced, where the adapter reads it back', async () => {

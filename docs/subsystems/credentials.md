@@ -126,6 +126,33 @@ async begin(request: AuthorizationRequest): Promise<AuthorizationOutcome>
 
 Source: [`packages/credentials/authorization/src/index.ts`](../../packages/credentials/authorization/src/index.ts)
 
+<a id="ctxauthorizationcontroller--authorizationcontroller"></a>
+
+### `ctx.authorizationController` — `AuthorizationController`
+
+Lists redacted flow metadata and binds one attempt to one bidirectional stream.
+
+```ts cordis-catalog
+/**
+ * List model sign-in methods available to an owner.
+ * @returns registered OAuth flows and their redacted record status; empty when none is registered.
+ */
+@Remote async list(): Promise<AuthorizationFlowView[]>
+
+/**
+ * Run one model sign-in method for the initiating owner browser.
+ * @param key - model credential key returned by `list()`.
+ * @param method - OAuth method id offered for that key.
+ * @param signal - stream lifetime; closing the stream withdraws the attempt and pending questions.
+ * @returns notices, questions, withdrawals, and the final outcome; answers travel on the same stream.
+ */
+@Remote({ mode: 'stream' }) begin(key: string, method: string, signal: AbortSignal): RemoteStream<AuthorizationFrame, AuthorizationAnswer>
+```
+
+Types: [RemoteStream](typert.md)
+
+Source: [`packages/api/settings-controller/src/authorization.ts`](../../packages/api/settings-controller/src/authorization.ts)
+
 <a id="ctxcredentials--credentialprovider-abstract-seam"></a>
 
 ### `ctx.credentials` — `CredentialProvider` (abstract seam)

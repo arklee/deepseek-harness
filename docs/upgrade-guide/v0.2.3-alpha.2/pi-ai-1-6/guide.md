@@ -13,8 +13,11 @@ The pi-ai adapter uses version 1.6.0. Chat Completions sends reasoning models' s
 
 Anthropic replay digests use a new seed for the updated serializer. Previously recorded signed thinking is omitted on replay, except where manual thinking requires the open tool round's thinking; text and tool calls remain. Server-side message threads stay disabled.
 
+A catalog route with an explicit `baseURL` cannot use the provider’s saved OAuth grant unless the URL matches the catalog endpoint’s HTTPS origin. This also applies to grants obtained in another profile sharing the same Harness home.
+
 ## Migration
 
 1. In the pi-ai plugin's provider or model `compat` settings in `cordis.patch.yml`, set `supportsDeveloperRole: true` only if your Chat Completions gateway requires the `developer` role.
 2. If your gateway requires an empty tools array after tool calls, set `requiresToolsWithToolHistory: true` in those settings. Otherwise leave it unset.
 3. Replace retired model selections with models offered by your provider. Verify a text request and a complete tool-call round through each configured gateway; check that the continuation succeeds without role or tools-field errors.
+4. If a gateway previously used a catalog provider’s OAuth grant, configure a gateway-issued API key instead. To reach the provider directly with OAuth, remove the `baseURL` override and confirm a request succeeds.

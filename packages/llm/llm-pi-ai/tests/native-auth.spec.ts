@@ -10,6 +10,19 @@ import { generateProviderData, resolverEnv } from '../scripts/gen-provider-data.
 import { catalogProvider } from '../src/catalog.ts'
 import { PROVIDER_DATA } from '../src/provider-data.generated.ts'
 import { providerDefaultsOf } from '../src/provider-data.ts'
+import { buildProvider } from '../src/provider.ts'
+
+it('keeps the provider grant off gateways sharing a catalog route id', () => {
+  const route = { provider: 'anthropic', displayName: 'Anthropic', models: [], namesCredential: false }
+  for (const api of [{}, { api: 'openai-responses' }]) {
+    const auth = (baseURL: string) => buildProvider({ ...route, ...api, baseURL }).auth
+    expect(auth('https://api.anthropic.com/v1').oauth).toBeDefined()
+    for (const endpoint of ['http://api.anthropic.com', 'https://gateway.example/v1']) {
+      expect(auth(endpoint).oauth).toBeUndefined()
+      expect(auth(endpoint).apiKey).toBeDefined()
+    }
+  }
+})
 
 describe('provider metadata', () => {
   it('matches every installed public resolver and catalog, including non-chat providers', async () => {

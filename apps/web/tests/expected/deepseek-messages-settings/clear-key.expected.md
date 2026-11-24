@@ -9,7 +9,7 @@
   - button "打开配置文件"
   - button "关闭"
   - heading "模型" [level=2]
-  - paragraph: 填入各提供商的 API 密钥即可使用其模型。
+  - paragraph: 填写 API 密钥，或使用支持的提供商账号登录。
   - list:
     - listitem:
       - text: DeepSeek API

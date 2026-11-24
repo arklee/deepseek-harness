@@ -123,16 +123,23 @@ export interface ProviderSpec {
  * one the installed catalog ships — would refuse a profile's explicit key with
  * `Provider is not configured` before any request went out. Adding the harness
  * method beside the provider's own restores that route. A keyless profile adds
- * nothing and still reports the honest refusal, because this adapter resolves
- * credentials through its own seam and holds no OAuth store to fall back on.
+ * nothing. A stored OAuth grant belongs to the catalog provider, not a
+ * gateway configured under the same route key, including in another profile.
  * @param spec - the resolved route facts.
  * @param catalog - the installed catalog provider, when pi-ai ships one.
  * @returns the auth to construct this route's provider with.
  */
 function routeAuth(spec: ProviderSpec, catalog: Provider | undefined): Provider['auth'] {
   if (catalog === undefined) return { apiKey: harnessApiKeyAuth(spec.displayName) }
-  if (catalog.auth.apiKey !== undefined || !spec.namesCredential) return catalog.auth
-  return { ...catalog.auth, apiKey: harnessApiKeyAuth(spec.displayName) }
+  const apiKey = catalog.auth.apiKey ?? (spec.namesCredential ? harnessApiKeyAuth(spec.displayName) : undefined)
+  if (spec.baseURL !== undefined && catalog.auth.oauth !== undefined) {
+    const destination = URL.parse(spec.baseURL)
+    const issuerEndpoint = catalog.baseUrl === undefined ? null : URL.parse(catalog.baseUrl)
+    if (destination?.protocol !== 'https:' || destination.origin !== issuerEndpoint?.origin) {
+      return apiKey === undefined ? {} : { apiKey }
+    }
+  }
+  return apiKey === undefined || apiKey === catalog.auth.apiKey ? catalog.auth : { ...catalog.auth, apiKey }
 }
 
 /**

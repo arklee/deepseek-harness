@@ -24,6 +24,12 @@ A saved credential displays a masked preview in the input and a green hint that 
 
 An editable, nonempty key draft has an eye button. Select **Show secret** to check what you typed, and **Hide secret** to mask it again. Changing the input masks it again. Native password fields do not offer cut; select the draft and press Backspace to erase it, or reveal it before cutting. Stored credentials remain write-only.
 
+## Sign in with OAuth
+
+In **Settings → Models → Add model provider**, select **OAuth**. Choose a provider and start sign-in. Follow its instructions: you may need to open a verification page, enter a device code there, or paste a code back into dsh. You do not need an API key. After authorization, select the provider’s model in the model picker.
+
+If the provider already has an API-key reference, custom endpoint, protocol, or headers, remove those overrides before using OAuth on that route. To keep a gateway configuration, leave it in place and use a separate catalog route such as `openai-codex` for ChatGPT. Removing a provider from the model list does not revoke its authorization at the issuer.
+
 ## Add a custom model API
 
 Switch the card to **Custom model API** for a relay, a company gateway, a self-hosted server, or any provider absent from the installed catalog. Supply a lowercase Provider ID, base URL, API protocol, credential, and at least one model. The **API protocol** must be the one your gateway speaks, and the picker offers four: OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, and Gemini API, stored in the active profile's `cordis.patch.yml` as `openai-completions`, `openai-responses`, `anthropic-messages`, and `google-generative-ai`. A Gemini API base URL includes the API version, such as `https://gateway.example/v1beta`. A provider speaks one protocol, so a gateway that serves two needs two providers.

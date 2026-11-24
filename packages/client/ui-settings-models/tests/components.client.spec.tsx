@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import Schema from '@deepseek-ai/schemastery'
 import { Context } from '@deepseek-ai/cordis'
 import { bindSnapshotSelector, RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
+import { openStream, RemoteMock } from '@deepseek-ai/dsh-remote-mock'
 import type {
   CredentialInfo, RemoteResult, SettingsNamespaceView,
 } from '@deepseek-ai/dsh-api-remotes/client'
@@ -188,7 +189,13 @@ function scriptedFace(overrides: {
   const mutate = overrides.mutate ?? vi.fn(() => Promise.resolve(remoteOk(providerNamespace)))
   const set = overrides.set ?? vi.fn(() => Promise.resolve(remoteOk(undefined)))
   const unset = overrides.unset ?? vi.fn(() => Promise.resolve(remoteOk(undefined)))
+  const auth = RemoteMock.create().stream('authorization/begin', openStream())
+  auth.remote.authorization.list.mockResolvedValue(remoteOk(['openai', 'anthropic', 'zombie'].map(provider => ({
+    key: `llm-pi-ai/${provider}`, label: provider, inFlight: false, configured: false,
+    methods: [{ id: provider === 'zombie' ? 'api-key' : 'oauth', label: `Sign in with ${provider}` }],
+  }))))
   const face = {
+    authorization: auth.remote.authorization,
     llm: {
       listProviders: vi.fn((): ReturnType<PageContext['remote']['llm']['listProviders']> => Promise.resolve(remoteOk([
         { id: 'deepseek-official', name: 'DeepSeek' },
@@ -231,7 +238,7 @@ function scriptedFace(overrides: {
       unset,
     },
   }
-  return { face, update, mutate, set, unset }
+  return { face, update, mutate, set, unset, auth }
 }
 
 type PageContext = ConstructorParameters<typeof ModelsSettingsStore>[0]
@@ -1771,6 +1778,110 @@ describe('ModelsSection', () => {
     expect(screen.getByRole('combobox', { name: en.provider })).toBeTruthy()
     // The custom panel is mounted but hidden, so its fields are not reachable.
     expect(screen.queryByRole('textbox', { name: en.customRoute })).toBeNull()
+  })
+
+  async function openOAuth(scripted = scriptedFace()) {
+    const page = await mountFace(scripted)
+    fireEvent.click(screen.getByRole('button', { name: en.add }))
+    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual([en.addCatalog, en.addCustom, en.addOAuth])
+    fireEvent.click(screen.getByRole('tab', { name: en.addOAuth }))
+    return { ...page, auth: scripted.auth, panel: within(screen.getByRole('tabpanel', { name: en.addOAuth })) }
+  }
+
+  it('answers the provider on its private stream and adopts only after authorization', async () => {
+    const scripted = scriptedFace()
+    const reply = Promise.withResolvers<unknown>()
+    scripted.auth.stream('authorization/begin', async (_args, stream) => {
+      stream.push({ kind: 'notice', notice: { message: 'Enter your device code', code: 'A2BC', url: 'https://example.test/login' } })
+      stream.push({ kind: 'notice', notice: { message: 'Waiting for confirmation' } })
+      stream.push({ kind: 'prompt', id: 3, prompt: { kind: 'secret', message: 'Confirmation' } })
+      for await (const item of stream.uplink) { reply.resolve(item); break }
+    })
+    const { auth, face, panel, mutate, set } = await openOAuth(scripted)
+    expect(Array.from((await panel.findByRole<HTMLSelectElement>('combobox', { name: en.provider })).options, option => option.value)).toEqual(['anthropic'])
+    expect(panel.getByText(en.oauthExcluded.replace('{providers}', 'openai'))).toBeTruthy()
+    fireEvent.click(panel.getByRole('button', { name: en.oauthLogin }))
+    expect(face.authorization.begin).toHaveBeenCalledWith('llm-pi-ai/anthropic', 'oauth', expect.any(AbortSignal))
+    const input = await panel.findByLabelText<HTMLInputElement>('Confirmation')
+    expect(input.type).toBe('password')
+    expect(panel.getByRole('link', { name: en.oauthOpen }).getAttribute('href')).toBe('https://example.test/login')
+    expect(panel.getByText('A2BC')).toBeTruthy()
+    expect(screen.getByRole<HTMLButtonElement>('tab', { name: en.addCustom }).disabled).toBe(true)
+    fireEvent.change(input, { target: { value: 'fixture-answer' } })
+    fireEvent.click(panel.getByRole('button', { name: en.welcomeContinue }))
+    await expect(reply.promise).resolves.toEqual({ id: 3, value: 'fixture-answer' })
+    expect(mutate).not.toHaveBeenCalled()
+    await act(async () => { auth.streams.push('authorization/begin', { kind: 'done', status: 'authorized' }) })
+    expect(mutate).toHaveBeenCalledWith('llm-pi-ai', [{ op: 'set', path: ['providers', 'anthropic'], value: {} }], 0)
+    expect(set).not.toHaveBeenCalled()
+    expect(await screen.findByText('Saved anthropic.')).toBeTruthy()
+  })
+
+  it('re-authenticates an existing native route without replacing its settings', async () => {
+    const scripted = scriptedFace()
+    scripted.face.settings.describe.mockResolvedValue(remoteOk({ writable: true, hasDocument: true,
+      namespaces: wireNamespaces().map(ns => ns.ns === 'llm-pi-ai' ? piAiNamespaceWith('openai', { displayName: 'My OpenAI' }) : ns),
+    }))
+    const { panel, auth, mutate } = await openOAuth(scripted)
+    fireEvent.click(await panel.findByRole('button', { name: en.oauthLogin }))
+    await act(async () => { auth.streams.push('authorization/begin', { kind: 'done', status: 'authorized' }) })
+    expect(await screen.findByText(openaiCopy(en.savedProvider))).toBeTruthy()
+    expect(mutate).not.toHaveBeenCalled()
+  })
+
+  it('cancels an abandoned flow and never adopts the route', async () => {
+    const { panel, auth, mutate } = await openOAuth()
+    fireEvent.click(await panel.findByRole('button', { name: en.oauthLogin }))
+    await act(async () => { panel.getByRole('button', { name: en.cancel }).click() })
+    expect(auth.log.streams('authorization/begin')[0]?.state).toBe('cancelled')
+    expect(mutate).not.toHaveBeenCalled()
+  })
+
+  it('retires withdrawn prompts and does not claim success on a broken stream', async () => {
+    const { panel, auth, mutate } = await openOAuth()
+    fireEvent.click(await panel.findByRole('button', { name: en.oauthLogin }))
+    await act(async () => { auth.streams.push('authorization/begin', {
+      kind: 'prompt', id: 7, prompt: { kind: 'select', message: 'Account', options: [{ id: 'id', label: 'Name' }] },
+    }) })
+    expect(panel.getByRole('combobox', { name: 'Account' })).toBeTruthy()
+    await act(async () => { auth.streams.push('authorization/begin', { kind: 'withdraw', id: 7 }) })
+    expect(panel.queryByRole('combobox', { name: 'Account' })).toBeNull()
+    await act(async () => { auth.streams.fail('authorization/begin', new Error('private diagnostic')) })
+    expect(panel.getByRole('alert').textContent).toBe(en.oauthFailed)
+    expect(mutate).not.toHaveBeenCalled()
+  })
+
+  it('retries a failed route write without requiring a second sign-in', async () => {
+    const scripted = scriptedFace()
+    scripted.mutate.mockResolvedValueOnce(remoteFail('write conflict', 'settings/conflict'))
+    const { panel, auth, face, mutate } = await openOAuth(scripted)
+    fireEvent.click(await panel.findByRole('button', { name: en.oauthLogin }))
+    await act(async () => { auth.streams.push('authorization/begin', { kind: 'done', status: 'authorized' }) })
+    expect(panel.getByRole('alert').textContent).toContain(en.oauthSaveFailed)
+    fireEvent.click(panel.getByRole('button', { name: en.apply }))
+    expect(await screen.findByText('Saved anthropic.')).toBeTruthy()
+    expect(mutate).toHaveBeenCalledTimes(2)
+    expect(face.authorization.begin).toHaveBeenCalledOnce()
+  })
+
+  it('preserves a custom endpoint added by another tab while signing in', async () => {
+    const { panel, auth, mirror, mutate } = await openOAuth()
+    fireEvent.click(await panel.findByRole('button', { name: en.oauthLogin }))
+    mirror.acceptView(piAiNamespaceWith('anthropic', { baseURL: 'https://proxy.example' }))
+    await act(async () => { auth.streams.push('authorization/begin', { kind: 'done', status: 'authorized' }) })
+    expect(panel.getByRole('alert').textContent).toBe(en.oauthSaveFailed)
+    expect(mutate).not.toHaveBeenCalled()
+    expect(screen.queryByText('Saved anthropic.')).toBeNull()
+  })
+
+  it('lets an owner retry flow discovery without exposing a raw transport diagnostic', async () => {
+    const scripted = scriptedFace()
+    scripted.face.authorization.list.mockRejectedValueOnce(new Error('private diagnostic'))
+    const { panel } = await openOAuth(scripted)
+    expect((await panel.findByRole('alert')).textContent).toBe(en.oauthListFailed)
+    fireEvent.click(panel.getByRole('button', { name: en.retry }))
+    expect(await panel.findByRole('button', { name: en.oauthLogin })).toBeTruthy()
+    expect(panel.queryByRole('alert')).toBeNull()
   })
 
   it('switches between the modes without losing either draft', async () => {

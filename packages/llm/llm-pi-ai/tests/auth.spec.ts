@@ -89,6 +89,19 @@ describe('pi-ai credential store over harness records', () => {
     await expect(ctx.credentials.readRecord(CODEX)).resolves.toEqual({ kind: 'grant', payload: granted })
   })
 
+  it('keeps a grant when a replacement sign-in is cancelled before its write is admitted', async () => {
+    const store = credentialStoreFrom(await stored())
+    const grant = { type: 'oauth' as const, access: 'original', refresh: 'rt', expires: 42 }
+    await store.modify('openai-codex', () => Promise.resolve(grant))
+    const cancellation = new AbortController()
+    const replace = vi.fn(() => Promise.resolve({ ...grant, access: 'replacement' }))
+    const write = store.modify('openai-codex', replace, { signal: cancellation.signal })
+    cancellation.abort()
+    await expect(write).rejects.toBe(cancellation.signal.reason)
+    expect(replace).not.toHaveBeenCalled()
+    await expect(store.read('openai-codex')).resolves.toEqual(grant)
+  })
+
   it('stores the JSON image of a grant, dropping explicitly-undefined members', async () => {
     const ctx = await stored()
     const store = credentialStoreFrom(ctx)

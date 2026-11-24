@@ -9,11 +9,12 @@
   - button "打开配置文件"
   - button "关闭"
   - heading "模型" [level=2]
-  - paragraph: 填入各提供商的 API 密钥即可使用其模型。
+  - paragraph: 填写 API 密钥，或使用支持的提供商账号登录。
   - list
   - tablist "添加方式":
     - tab "第三方模型提供商" [selected]
     - tab "自定义模型 API"
+    - tab "OAuth"
   - paragraph: 从内置目录中选择 OpenAI、Anthropic、Kimi 等提供商，填入其 API 密钥即可使用。
   - tabpanel "第三方模型提供商":
     - text: 提供商
@@ -49,6 +50,7 @@
       - option "qwen-token-plan"
       - option "qwen-token-plan-cn"
       - option "qwen-token-plan-individual"
+      - option "qwen-token-plan-individual-cn"
       - option "radius"
       - option "together"
       - option "vercel-ai-gateway"

@@ -32,6 +32,10 @@ export type ModelDiscoveryOutcome =
 
 /** The Host operations the Models page and its cards invoke. */
 export interface ModelsOperations {
+  /** Registered provider sign-in flows, without credential payloads. */
+  listAuthorization: ClientContext['remote']['authorization']['list']
+  /** A private conversation with the selected provider's sign-in flow. */
+  beginAuthorization: ClientContext['remote']['authorization']['begin']
   /**
    * Store one credential literal under its reference.
    * @param ref - credential reference name.
@@ -75,6 +79,8 @@ export interface ModelsOperations {
  */
 export function createModelsOperations(ctx: ClientContext): ModelsOperations {
   return {
+    listAuthorization: () => ctx.remote.authorization.list(),
+    beginAuthorization: (key, method, signal) => ctx.remote.authorization.begin(key, method, signal),
     storeCredential: async (ref, value) => {
       const response = await ctx.remote.credentials.set(ref, value)
       return response.ok ? undefined : response.error.message

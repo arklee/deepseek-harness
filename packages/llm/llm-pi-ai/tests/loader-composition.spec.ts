@@ -143,14 +143,12 @@ describe('llm-pi-ai real dormant composition', () => {
     expect(server.headers[0]?.authorization).toBe('Bearer key-from-store')
   })
 
-  it('offers OpenAI sign-in by API key only, while other subscription logins stay', async () => {
+  it('offers OpenAI and Anthropic subscription and API-key sign-ins', async () => {
     const { ctx } = await loadComposition()
     const methods = (provider: string): string[] | undefined => ctx.authorization.list()
       .find(entry => entry.key === recordKeyFor(provider))?.methods.map(method => method.id)
 
-    // pi-ai's Sign in with ChatGPT needs an installation ID the harness does
-    // not supply, so the route offers only its key login.
-    expect(methods('openai')).toEqual(['api-key'])
+    expect(methods('openai')).toEqual(['oauth', 'api-key'])
     expect(methods('anthropic')).toEqual(['oauth', 'api-key'])
   })
 
