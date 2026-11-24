@@ -2,6 +2,14 @@
 
 DeepSeek Harness is an all-plugin Cordis agent harness. Read [docs/architecture.md](docs/architecture.md) before changing `packages/`; follow [docs/AGENTS.md](docs/AGENTS.md) for documentation.
 
+## Personal fork
+
+This is a personal DSH fork. `origin` is `arklee/deepseek-harness`; `upstream` is `deepseek-ai/deepseek-harness`. Keep `master` free of local features as the upstream baseline; maintain customizations on `custom`, with feature branches based on it.
+
+Prefer existing plugin extension points. When they cannot express the requested behavior, core changes, including `agent-loop` changes, are allowed in this fork; update affected documentation and tests. This permission takes precedence over the plugins-only rule below. Keep custom changes focused and separate from unrelated cleanup.
+
+When asked to synchronize upstream, fetch it and rebase `custom` onto `upstream/master` with `rerere` enabled. Start with a clean worktree and preserve a backup branch. Resolve conflicts without discarding custom behavior, and run checks covering both upstream changes and customizations. Do not rewrite a branch others depend on without coordination; use `--force-with-lease` only when a push is authorized. Do not publish this fork as an official DeepSeek release.
+
 ## Pre-stable APIs and released Session data
 
 Public APIs are pre-stable; update every consumer. Follow [version/status](docs/session-format-status.md) and [type acknowledgements](docs/cookbook/reviewing-persistence-type-changes.md). [Adjacent migration](.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.md) may add a version-named successor but never move, overwrite, or delete committed generations; predecessors imply neither fallback nor downgrade support. SQLite uses monotonic `SCHEMA_VERSION`.
